@@ -1,66 +1,74 @@
 import os
 import json
+import datetime
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import gspread
-from google.oauth2 import service_account
-from datetime import datetime
+from google.oauth2.service_account import Credentials
 
-# ✅ 환경변수
-TOKEN = os.getenv("TOKEN")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
+# 구글 시트 설정
+SPREADSHEET_ID = '1RiZyD5oxzZCTyveLhB9Y3H2rsurzK35cQMHg39Pzz3I'
+WORKSHEET_NAME = 'list'
 
-# ✅ 인증 처리
-info = json.loads(GOOGLE_CREDS_JSON)
-creds = service_account.Credentials.from_service_account_info(info)
-gc = gspread.authorize(creds)
-sheet = gc.open_by_key(SPREADSHEET_ID).worksheet("list")  # 정리된 시트 사용
+# 구글 인증 (Railway 환경 변수에서 JSON 파싱)
+google_creds = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+creds = Credentials.from_service_account_info(google_creds)
+client = gspread.authorize(creds)
+sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
 
-# ✅ 로깅
-logging.basicConfig(level=logging.INFO)
+# 텔레그램 봇 토큰
+BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']  # Railway에 등록한 환경변수
 
-# ✅ /list 명령어 처리
-async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 날짜 처리 유틸
+def extract_month(date_str):
+    try:
+        return datetime.datetime.strptime(date_str, '%Y-%m-%d').month
+    except:
+        return None
+
+def extract_region(text):
+    return text[:2] if text else ''
+
+# /list 명령어 처리
+async def list_race(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
-    now = datetime.now()
-    month_filter = []
-    region_filter = []
+    if not args:
+        await update.message.reply_text("📌 예시: /list 5월 또는 /list 5월 광주 전남")
+        return
 
-    # 인자 구분 (숫자: 월, 문자열: 지역)
+    months = []
+    regions = []
+
     for arg in args:
-        if arg.endswith("월") or arg.strip("월").isdigit():
-            month_filter.append(arg.strip("월"))
+        if '월' in arg:
+            try:
+                months.append(int(arg.replace('월', '')))
+            except:
+                continue
         else:
-            region_filter.append(arg.replace('"', '').replace("“", "").replace("”", ""))
+            regions.append(arg.replace('"', '').replace("'", ''))
 
-    values = sheet.get_all_records()
-    result = []
+    rows = sheet.get_all_records()
+    filtered = []
 
-    for row in values:
-        race_month = str(row.get("월", ""))
-        race_region = str(row.get("지역", ""))[:2]  # 앞 2글자
+    for row in rows:
+        race_month = extract_month(row['일자'])
+        race_region = extract_region(row['지역'])
 
-        # 월 필터 적용
-        if month_filter and race_month not in month_filter:
-            continue
-        # 지역 필터 적용
-        if region_filter and not any(r in race_region for r in region_filter):
-            continue
+        if (not months or race_month in months) and (not regions or any(r in race_region for r in regions)):
+            filtered.append(f"{row['일자']} | {row['종목']} | {row['대회명']} | {row['지역']} | {row['접수 시작일']} ~ {row['접수 마감일']}\n🔗 {row['링크']}")
 
-        result.append(f"{row['일자']} | {row['종목']} | {row['대회명']} | {row['장소']}")
-
-    if result:
-        reply = "🏃‍♂️ 검색된 대회 목록:\n" + "\n".join(result[:20])  # 최대 20개
+    if filtered:
+        message = f"🏃‍♂️ 총 {len(filtered)}개의 대회가 있습니다:\n\n" + "\n\n".join(filtered[:20])
     else:
-        reply = "❌ 조건에 맞는 대회가 없습니다."
+        message = "📭 조건에 맞는 대회가 없습니다."
 
-    await update.message.reply_text(reply)
+    await update.message.reply_text(message)
 
-# ✅ 메인 실행
+# 봇 실행
 if __name__ == '__main__':
-    print("🤖 러닝매니저 봇 실행 중...")
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("list", list_command))
+    logging.basicConfig(level=logging.INFO)
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("list", list_race))
     app.run_polling()
