@@ -8,19 +8,19 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # 구글 시트 설정
-SPREADSHEET_ID = '1RiZyD5oxzZCTyveLhB9Y3H2rsurzK35cQMHg39Pzz3I'
+SPREADSHEET_ID = os.getenv('SPREADSHEET_ID', '')
 WORKSHEET_NAME = 'list'
 
-# 구글 인증 (Railway 환경 변수에서 JSON 파싱)
+# 인증 JSON은 환경변수에서 가져오기
 google_creds = json.loads(os.environ['GOOGLE_CREDENTIALS'])
 creds = Credentials.from_service_account_info(google_creds)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
 
 # 텔레그램 봇 토큰
-BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']  # Railway에 등록한 환경변수
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# 날짜 처리 유틸
+# 날짜 파싱 유틸
 def extract_month(date_str):
     try:
         return datetime.datetime.strptime(date_str, '%Y-%m-%d').month
@@ -30,7 +30,7 @@ def extract_month(date_str):
 def extract_region(text):
     return text[:2] if text else ''
 
-# /list 명령어 처리
+# /list 명령어
 async def list_race(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -66,9 +66,10 @@ async def list_race(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(message)
 
-# 봇 실행
+# 실행
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("list", list_race))
     app.run_polling()
+
